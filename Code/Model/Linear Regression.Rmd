@@ -1,0 +1,49 @@
+## Linear Regression
+
+### Full Model without Selection
+```{r}
+library(readr)
+library(leaps)
+library(tidyr)
+data <- read_csv("../../Data/Flight_final.csv", show_col_types = TRUE)
+drops <- c("Year", "Month", "FlightDate", "DOT_ID_Marketing_Airline", "Flight_Number_Marketing_Airline", "CRSDepTime", "DepTime", "CRSArrTime", "ArrTime", "DivAirportLandings", "DepDelayMinutes", "Flights")
+df <- data[ , !(names(data) %in% drops)]
+df$CancellationCode <- as.factor(df$CancellationCode)
+train <- df[df$DayofMonth <= 25, ]
+test <- df[df$DayofMonth > 25, ]
+train <- train[,!names(train) %in% c("DayofMonth")]
+test <- test[,!names(test) %in% c("DayofMonth")]
+head(train)
+model1 <- lm(DepDelay ~ DayOfWeek + Marketing_Airline_Network + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance + Diverted + Origin + Dest, data = train)
+summary(model1)
+predict1 = predict(model1, test)
+prediction <- data.frame(predict1, test$DepDelay)
+prediction <- na.omit(prediction)
+mean((prediction$test.DepDelay - prediction$predict1)^2) %>% sqrt()
+```
+### Best Subset Selection
+```{r}
+regfit.full = regsubsets(DepDelay ~ DayOfWeek + Marketing_Airline_Network + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance + Diverted, data = train, nvmax=20, really.big = T, method="forward")
+reg.summary=summary(regfit.full)
+par(mfrow = c(1, 3))
+# plot Cp
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type="b")
+points(which.min(reg.summary$cp),reg.summary$cp[which.min(reg.summary$cp)],col="red",cex=2,pch=20)
+# plot BIC
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type="b")
+points(which.min(reg.summary$bic),reg.summary$bic[which.min(reg.summary$bic)],col="red",cex=2,pch=20)
+# plot adjusted R^2
+plot(reg.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="b")
+points(which.max(reg.summary$adjr2),reg.summary$adjr2[which.max(reg.summary$adjr2)], col="red",cex=2,pch=20)
+coef(regfit.full,13)
+```
+
+### Model with variable selection
+```{r}
+model2 <- lm(DepDelay ~ DayOfWeek + Marketing_Airline_Network + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance, data = train)
+summary(model2)
+predict2 = predict(model2, test)
+prediction2 <- data.frame(predict2, test$DepDelay)
+prediction2 <- na.omit(prediction2)
+mean((prediction2$test.DepDelay - prediction2$predict2)^2) %>% sqrt()
+```

@@ -1,0 +1,100 @@
+---
+title: "Multinomial Logistic Regression"
+author: "Yunhong Yang"
+date: "2023-04-24"
+output: html_document
+---
+
+## Import Data & Library
+```{r}
+library(readr)
+library(nnet)
+library(lmtest)
+library(caret)
+library(tidyr)
+```
+
+```{r}
+data <- read_csv("../../Data/Flight_final.csv", show_col_types = TRUE)
+```
+### Select Columns / Drop Columns
+```{r}
+drops <- c("Year", "Month", "FlightDate", "DOT_ID_Marketing_Airline", "Flight_Number_Marketing_Airline", "CRSDepTime", "DepTime", "CRSArrTime", "ArrTime", "DivAirportLandings", "DepDelayMinutes", "Flights")
+df <- data[ , !(names(data) %in% drops)]
+```
+
+### Change NA in DepDelay
+```{r}
+#df$DepDelay <- replace(df$DepDelay, is.na(df$DepDelay), 3500)
+```
+
+### Add Cancelation to the Group
+```{r}
+df$DepartureDelayGroups <- replace(df$DepartureDelayGroups, is.na(df$DepartureDelayGroups), "Cancel")
+
+df$DepartureDelayGroups <- as.factor(df$DepartureDelayGroups)
+
+table(is.na(df$DepartureDelayGroups))
+```
+
+### Check NA
+```{r}
+colSums(is.na(df))
+```
+
+### Split Data into Train & Test
+```{r}
+train <- df[df$DayofMonth <= 25, ]
+test <- df[df$DayofMonth > 25, ]
+
+train <- train[,!names(train) %in% c("DayofMonth")]
+test <- test[,!names(test) %in% c("DayofMonth")]
+```
+
+### By nnet 
+```{r}
+model1 <- multinom(DepartureDelayGroups ~ DayOfWeek + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance + Diverted, data=train, maxit=200)
+#summary(model1)
+```
+
+```{r}
+predict1 <- predict(model1, newdata = test, type = "class")
+true <- subset(test, DepartureDelayGroups != "Cancel") 
+true_list <- true$DepartureDelayGroups
+true_list <- droplevels(true_list)
+# Compare the predicted classes to the actual classes to evaluate the performance of the model
+accuracy <- table(predict1 == true_list)
+accuracy/length(predict1)
+```
+
+### By knn
+
+#### Data for knn
+```{r}
+train_knn <- train %>% drop_na(TaxiIn)
+test_knn <- test %>% drop_na(TaxiIn)
+```
+
+```{r}
+knn_fit <- knn3(DepartureDelayGroups ~ DayOfWeek + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance , data=train_knn, k = 16)
+y_hat_knn <- predict(knn_fit, test_knn, type = "class")
+confusionMatrix(y_hat_knn, test_knn$DepartureDelayGroups)$overall["Accuracy"]
+
+#compare
+y_hat_knn <- predict(knn_fit, train_knn, type = "class")
+confusionMatrix(y_hat_knn, train_knn$DepartureDelayGroups)$overall["Accuracy"]
+```
+
+### try different k
+```{r}
+for (k in 10:20){
+  knn_fit5 <- knn3(DepartureDelayGroups ~ DayOfWeek + Marketing_Airline_Network + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance + Diverted, data=train_knn, k = k)
+  y_hat_knn5 <- predict(knn_fit5, test_knn, type = "class")
+  print(confusionMatrix(y_hat_knn5, test_knn$DepartureDelayGroups)$overall["Accuracy"])
+}
+#knn_fit5 <- knn3(DepartureDelayGroups ~ DayOfWeek + TaxiOut + WheelsOff + WheelsOn + TaxiIn + Distance + Diverted, data=train_knn, k = k)
+#y_hat_knn5 <- predict(knn_fit5, test_knn, type = "class")
+#confusionMatrix(y_hat_knn5, test_knn$DepartureDelayGroups)$overall["Accuracy"]
+```
+
+

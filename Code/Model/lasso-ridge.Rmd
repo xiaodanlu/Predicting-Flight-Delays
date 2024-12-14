@@ -1,0 +1,479 @@
+---
+title: "RF"
+author: "Xinran Zhang"
+date: "2023-04-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tree)
+library(ISLR)
+library(caret)
+library(rpart)
+library(rattle)
+library(visNetwork)
+```
+
+## variable selection
+
+```{r}
+data = read.csv("../../Data/Flight_final.csv")
+```
+
+```{r}
+data = data[1:576827,1:39]
+```
+
+```{r}
+names(data)
+```
+
+```{r}
+data = subset(data, select = -c(Year,Month,DayofMonth,DOT_ID_Marketing_Airline,Flight_Number_Marketing_Airline,OriginCityName,OriginStateName,DestCityName,DestStateName,DepTime,DepDelay,DepDel15,DepartureDelayGroups,ArrTime,ArrDelayMinutes,ArrDel15,ArrivalDelayGroups,Cancelled,CancellationCode,Diverted,Flights,DistanceGroup))
+```
+
+```{r}
+data = na.omit(data)
+```
+
+
+```{r}
+head(data)
+```
+
+
+
+```{r}
+library(fastDummies)
+data_dummy = dummy_cols(data,select_columns = c("DayOfWeek","Marketing_Airline_Network","Origin"))
+```
+
+
+```{r}
+data_dummy$FlightDate = as.Date(data_dummy$FlightDate,"%m/%d/%Y")
+```
+
+```{r}
+train_data = subset(data_dummy,FlightDate<=as.Date("2022-12-25"))
+test_data = subset(data_dummy,FlightDate>as.Date("2022-12-25"))
+```
+
+
+```{r}
+train_data = subset(train_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+test_data = subset(test_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+```
+
+
+```{r}
+library(glmnet)
+library(leaps)
+```
+
+## lasso
+
+```{r}
+x_train = subset(train_data,select=-c(DepDelayMinutes))
+y_train = train_data$DepDelayMinutes
+x_test = subset(test_data,select=-c(DepDelayMinutes))
+y_test = test_data$DepDelayMinutes
+```
+
+
+
+```{r}
+cv_lasso <- cv.glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1, n_folds = 10)
+```
+
+
+```{r}
+best_lambda <- cv_lasso$lambda.min
+
+best_lasso <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1, lambda = best_lambda)
+```
+
+```{r}
+model <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1)
+```
+
+```{r}
+plot(model, xvar = "lambda")
+```
+```{r}
+best_lambda
+```
+
+
+
+```{r}
+y_predicted_lasso <- predict(model, s = best_lambda, newx = model.matrix(DepDelayMinutes~.,test_data))
+```
+
+
+
+
+```{r}
+mean((y_predicted_lasso-test_data$DepDelayMinutes)^2)
+```
+
+
+## ridge
+
+```{r}
+cv_ridge <- cv.glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0, n_folds = 10)
+best_lambda <- cv_ridge$lambda.min
+
+best_ridge <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0, lambda = best_lambda)
+```
+
+
+
+```{r}
+model <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0)
+plot(model, xvar = "lambda")
+y_predicted_ridge <- predict(model, s = best_lambda, newx = model.matrix(DepDelayMinutes~.,test_data))
+```
+
+
+## random forest
+
+#### bagging
+
+
+
+
+```{r}
+library(randomForest)
+```
+
+
+```{r}
+data_dummy = data
+```
+
+
+```{r}
+data_dummy$FlightDate = as.Date(data_dummy$FlightDate,"%m/%d/%Y")
+```
+
+```{r}
+train_data = subset(data_dummy,FlightDate<=as.Date("2022-12-25"))
+test_data = subset(data_dummy,FlightDate>as.Date("2022-12-25"))
+```
+
+
+```{r}
+train_data = subset(train_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+test_data = subset(test_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+```
+
+```{r}
+#bag=randomForest(DepDelayMinutes~.,data=train_data,mtry=5,ntree=25,importance=TRUE)
+#bag
+#yhat.bag = predict(bag,newdata=test_data)
+#plot(yhat.bag, test_data$DepDelayMinutes)
+#abline(0,1)
+#mean((yhat.bag-test_data$DepDelayMinutes)^2)
+```
+
+
+Since our dataset is too large, it seems that random forest cannot be used for our current research.
+
+
+## decision tree
+
+```{r}
+tree = tree(DepDelayMinutes~.,data = train_data)
+summary(tree)
+tree2=rpart(DepDelayMinutes~.,data = train_data)
+fancyRpartPlot(tree2)
+visTree(tree2)
+```
+
+
+```{r}
+tree.initial =tree::tree(DepDelayMinutes~.,data=train_data)
+summary(tree.initial)
+plot(tree.initial)
+text(tree.initial,pretty=0)
+```
+
+```{r}
+cv.tree = cv.tree(tree.initial)
+#plot(cv.tree$size,cv.tree$DepDelayMinutes,type='b')
+prune.tree=prune.tree(tree.initial)
+plot(prune.tree)
+#text(prune.tree,pretty=0)
+yhat=predict(tree.initial,newdata=test_data)
+plot(yhat,test_data$DepDelayMinutes)
+abline(0,1)
+mean((yhat-test_data$DepDelayMinutes)^2)
+```
+
+```{r}
+group_by_origin = data %>%
+  group_by(Origin) %>% count()
+```
+
+
+```{r}
+data = data[order(group_by_origin$n)<20,]
+data_dummy = data
+
+data_dummy$FlightDate = as.Date(data_dummy$FlightDate,"%m/%d/%Y")
+train_data = subset(data_dummy,FlightDate<=as.Date("2022-12-25"))
+test_data = subset(data_dummy,FlightDate>as.Date("2022-12-25"))
+
+train_data = subset(train_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+test_data = subset(test_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+```
+
+
+
+
+```{r}
+rf=randomForest(DepDelayMinutes~.,data=train_data,mtry=6,importance=TRUE)
+yhat.rf = predict(rf,newdata=test_data)
+mean((yhat.rf-test_data$DepDelayMinutes)^2)
+importance(rf)
+varImpPlot(rf)
+```
+
+
+```{r}
+library("gbm")
+boost=gbm(DepDelayMinutes~.,data=train_data,distribution="gaussian",n.trees=100,interaction.depth=4,shrinkage=0.2,verbose=F)
+summary(boost)
+yhat.boost=predict(boost,newdata=test_data,n.trees=100)
+mean((yhat.boost-test_data$DepDelayMinutes)^2)
+#boost.boston=gbm(medv~.,data=Boston[train,],distribution="gaussian",n.trees=5000,interaction.depth=4,shrinkage=0.2,verbose=F)
+#yhat.boost=predict(boost.boston,newdata=Boston[-train,],n.trees=5000)
+#mean((yhat.boost-boston.test)^2)
+```
+
+
+```{r}
+
+```
+
+
+
+
+```{r}
+#rf=randomForest(DepDelayMinutes~.,data=train_data,mtry=13,ntree=25)
+#yhat.rf = predict(rf.boston,newdata=Boston[-train,])
+#mean((yhat.rf-boston.test)^2)
+#importance(rf.boston)
+#varImpPlot(rf.boston)
+```
+
+
+
+
+
+
+
+
+```{r}
+data = read.csv("../On_Time_Marketing_Carrier_On_Time_Performance_2022_12_final.csv")
+```
+
+```{r}
+data = data[1:576827,1:39]
+```
+
+
+```{r}
+data = subset(data, select = -c(Year,Month,DayofMonth,DOT_ID_Marketing_Airline,Flight_Number_Marketing_Airline,OriginCityName,OriginStateName,DestCityName,DestStateName,DepTime,DepDelay,DepDel15,DepartureDelayGroups,ArrTime,ArrDelayMinutes,ArrDel15,ArrivalDelayGroups,Cancelled,CancellationCode,Diverted,Flights,DistanceGroup))
+```
+
+```{r}
+data = na.omit(data)
+data_dummy = data
+```
+
+
+```{r}
+data_dummy$FlightDate = as.Date(data_dummy$FlightDate,"%m/%d/%Y")
+```
+
+```{r}
+train_data = subset(data_dummy,FlightDate<=as.Date("2022-12-25"))
+test_data = subset(data_dummy,FlightDate>as.Date("2022-12-25"))
+```
+
+
+```{r}
+train_data = subset(train_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+test_data = subset(test_data,select = -c(FlightDate,ArrDelay,ActualElapsedTime,Dest,DayOfWeek,Marketing_Airline_Network,Origin))
+```
+
+
+```{r}
+x_train = subset(train_data,select=-c(DepDelayMinutes))
+y_train = train_data$DepDelayMinutes
+x_test = subset(test_data,select=-c(DepDelayMinutes))
+y_test = test_data$DepDelayMinutes
+```
+
+
+
+```{r}
+cv_lasso <- cv.glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1, n_folds = 10)
+```
+
+
+```{r}
+best_lambda <- cv_lasso$lambda.min
+
+best_lasso <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1, lambda = best_lambda)
+```
+
+```{r}
+model <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 1)
+```
+
+```{r}
+plot(model, xvar = "lambda")
+```
+
+```{r}
+y_predicted_lasso <- predict(model, s = best_lambda, newx = model.matrix(DepDelayMinutes~.,test_data))
+```
+
+
+
+```{r}
+(mean((y_predicted_lasso-test_data$DepDelayMinutes)^2))^0.5
+```
+
+
+```{r}
+4448.381^0.5
+```
+
+```{r}
+cv_ridge <- cv.glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0, n_folds = 10)
+best_lambda <- cv_ridge$lambda.min
+
+best_ridge <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0, lambda = best_lambda)
+```
+
+
+
+```{r}
+model <- glmnet(model.matrix(DepDelayMinutes~.,train_data), y_train, alpha = 0)
+plot(model, xvar = "lambda")
+y_predicted_ridge <- predict(model, s = best_lambda, newx = model.matrix(DepDelayMinutes~.,test_data))
+(mean((y_predicted_ridge-test_data$DepDelayMinutes)^2))^0.5
+```
+
+
+
+
+```{r}
+tree.initial =tree::tree(DepDelayMinutes~.,data=train_data)
+summary(tree.initial)
+plot(tree.initial)
+text(tree.initial,pretty=0)
+```
+
+```{r}
+cv.tree = cv.tree(tree.initial)
+#plot(cv.tree$size,cv.tree$DepDelayMinutes,type='b')
+prune.tree=prune.tree(tree.initial)
+plot(prune.tree)
+#text(prune.tree,pretty=0)
+yhat=predict(tree.initial,newdata=test_data)
+plot(yhat,test_data$DepDelayMinutes)
+abline(0,1)
+(mean((yhat-test_data$DepDelayMinutes)^2))^0.5
+```
+
+
+```{r}
+library("gbm")
+boost=gbm(DepDelayMinutes~.,data=train_data,distribution="gaussian",n.trees=100,interaction.depth=4,shrinkage=0.2,verbose=F)
+yhat.boost=predict(boost,newdata=test_data,n.trees=100)
+(mean((yhat.boost-test_data$DepDelayMinutes)^2))^0.5
+```
+
+```{r}
+names(train_data)
+```
+
+
+```{r}
+summary(boost)
+```
+
+
+```{r}
+model_rmse = data.frame(c(28.65,64.36,66.29,66.29,67.56),row.names = c("Boosting","DecisionTree","Ridge","Lasso","LinearRegression"))
+rmse_values <- list(Boosting = 28.65, DecisionTree = 64.36, Ridge = 66.29, Lasso = 66.29, LinearRegression=67.56)
+```
+
+
+```{r}
+rmse_df <- data.frame(Model = names(rmse_values), RMSE = unlist(rmse_values))
+
+library(ggplot2)
+library(RColorBrewer)
+```
+
+
+```{r}
+pinky1_palette <- brewer.pal(3, "PuRd")
+
+ggplot(rmse_df, aes(x = Model, y = RMSE)) +
+  geom_point(size = 4, color = pinky1_palette[2]) + # Use the second color in the Pinky1 palette
+  theme_minimal() +
+  theme(text = element_text(size = 14)) +
+  labs(title = "RMSE Values for Each Model",
+       x = "Model",
+       y = "RMSE Value")
+
+```
+
+
+
+```{r}
+ggplot(rmse_df, aes(x = Model, y = RMSE)) +
+  geom_point(size = 4, color = pinky1_palette[2]) + # Use the second color in the Pinky1 palette
+  geom_text(aes(label = round(RMSE, 2)), vjust = -0.5, hjust = -0.5, size = 4) + # Add the value number next to each point
+  theme_minimal() +
+  theme(text = element_text(size = 14)) +
+  labs(title = "RMSE Values for Each Model",
+       x = "Model",
+       y = "RMSE Value")
+
+```
+
+
+```{r}
+boost_summary <- summary(boost, n.trees = boost$n.trees)
+
+importance_df <- data.frame(Variable = rownames(boost_summary), Importance = boost_summary$rel.inf)
+
+pinky1_palette <- brewer.pal(3, "PuRd")
+
+
+ggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = pinky1_palette[2]) + # Use the second color in the Pinky1 palette
+  theme_minimal() +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Relative Importance of Variables in Boosting Model",
+       x = "Variable",
+       y = "Relative Importance") +
+  coord_flip()
+
+```
+
+
+
